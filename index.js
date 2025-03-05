@@ -6,25 +6,48 @@ const backendPort = 3400;
 const frontendPort = 4200;
 const port = process.env.PORT || backendPort;
 
-const client = new Client({
-    user: 'postgres',
-    host: 'localhost',
-    database: 'packmas_db',
-    password: 'postgresql4Crap!',
-    port: 3300,
-});
+// const client = new Client({
+//     user: 'postgres',
+//     host: 'localhost',
+//     database: 'packmas_db',
+//     password: 'postgresql4Crap!',
+//     port: 3300,
+// });
 
 // HEROKU DB
-// const client = new Client({
-//     user: 'whvuennigfhsfj',
-//     host: 'ec2-52-51-248-250.eu-west-1.compute.amazonaws.com',
-//     database: 'da65frsefubl36',
-//     password: '93efbf1c80ff756030f418b429ebd60bd1ea504d9589a3fe116b1246fc1f366b',
-//     port: 5432,
-//     ssl: {
-//         rejectUnauthorized: false
-//     }
-// });
+const client = new Client({
+    user: 'whvuennigfhsfj',
+    host: 'ec2-52-51-248-250.eu-west-1.compute.amazonaws.com',
+    database: 'da65frsefubl36',
+    password: '93efbf1c80ff756030f418b429ebd60bd1ea504d9589a3fe116b1246fc1f366b',
+    port: 5432,
+    ssl: {
+        rejectUnauthorized: false
+    }
+});
+
+const settingsTables = [
+    { 
+        table: 'CAR_BRANDS',
+        elements: ['Audi', 'Opel', 'Maserati', 'VW']
+    },
+    {
+        table: 'CAR_VARIANTS',
+        elements: ['Limousine', 'SUV', 'Pickup', 'Van']
+    },
+    {
+        table: 'GENERAL_VIEW',
+        elements: []
+    },
+    {
+        table: 'THING_UNITS',
+        elements: ['kg', 'Dose', 'Bund', 'Glas']
+    },
+    {
+        table: 'THING_CATEGORIES',
+        elements: ['Verbrauchsgegenstände', 'Nahrungsmittel', 'Sonstige']
+    }
+]
 
 client.connect();
 
@@ -37,19 +60,19 @@ client.query(`
  `);
 
 app.use(express.json());
-app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', 'http://localhost:' + frontendPort);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-    next();
-});
-
 // app.use((req, res, next) => {
-//     res.setHeader('Access-Control-Allow-Origin', 'https://caiborga.github.io/mtc-frontend/browser/');
+//     res.setHeader('Access-Control-Allow-Origin', 'http://localhost:' + frontendPort);
 //     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
 //     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
 //     next();
 // });
+
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', 'https://pack-mas-5525b94af9e0.herokuapp.com/dist/browser/');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    next();
+});
 
 // app.use((req, res, next) => {
 //     res.setHeader('Access-Control-Allow-Origin', 'https://caiborga.github.io');
@@ -71,6 +94,29 @@ function generateKey() {
     return key;
 }
 
+async function generateSettingsTables(key) {
+    try {
+        for (const setting of settingsTables) {
+            const tableName = `group_${key}.${setting.table.toLowerCase()}`;
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS ${tableName} (
+                    id SERIAL PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            `);
+            
+            if (setting.elements.length > 0) {
+                for (const element of setting.elements) {
+                    await client.query(`INSERT INTO ${tableName} (value) VALUES ($1) ON CONFLICT DO NOTHING`, [element]);
+                }
+            }
+        }
+        console.log(`Settings tables for group ${key} created successfully.`);
+    } catch (err) {
+        console.error("Error:", err.message);
+    }
+}
+
 async function generateDatabase(key) {
     try {
 
@@ -78,6 +124,19 @@ async function generateDatabase(key) {
         await client.query(`CREATE SCHEMA IF NOT EXISTS group_${key}`);
 
         // Erstelle die Tabellen im Schema der Gruppe
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS group_${key}.cars (
+                id SERIAL PRIMARY KEY,
+                brand FLOAT,
+                name TEXT,
+                driver FLOAT,
+                passengers TEXT, 
+                seats FLOAT,
+                color TEXT,
+                model TEXT
+            )
+        `);
+
         await client.query(`
             CREATE TABLE IF NOT EXISTS group_${key}.participants (
                 id SERIAL PRIMARY KEY,
@@ -103,9 +162,12 @@ async function generateDatabase(key) {
                 tour_data TEXT,
                 tour_members TEXT,
                 tour_things TEXT,
-                tour_cars TEXT
+                tour_cars TEXT,
+                tour_assignments TEXT
             )
         `);
+
+        await generateSettingsTables(key);
 
         console.log(`Database for group with key ${key} created successfully.`);
     } catch (err) {
@@ -277,6 +339,159 @@ app.delete('/api/participants/:id', async (req, res) => {
     }
 });
 
+// CARS
+
+app.post('/api/cars', async (req, res) => {
+    try {
+        const schema = await getSchema(req);
+        const { name, driver, passengers, seats, model, brand, color } = req.body;
+
+        const result = await client.query(
+            `INSERT INTO ${schema}.cars (name, driver, passengers, seats, model, brand, color) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+            [name, driver, passengers, seats, model, brand, color]
+        );
+
+        const newCarId = result.rows[0].id;
+
+        res.status(200).json({ message: 'Car added successfully', id: newCarId });
+    } catch (err) {
+        console.error("Error:", err.message);
+        if (err.message === 'Authorization header is missing' || err.message === 'Key not found') {
+            res.status(404).json({ message: 'Not found' });
+        } else {
+            res.status(500).json({ error: err.message });
+        }
+    }
+});
+
+app.get('/api/cars', async (req, res) => {
+    try {
+        const schema = await getSchema(req);
+
+        // Params
+        const page = parseInt(req.query.page) || 1;
+        const filter = req.query.filter || '';
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+        
+        // Parameterisierte Abfrage zur Vermeidung von SQL-Injections
+        const query = `
+            SELECT * 
+            FROM ${schema}.cars
+            WHERE name ILIKE $1
+            LIMIT $2 OFFSET $3
+        `;
+
+        // Abfrage für die Gesamtzahl der Autos
+        const countQuery = `
+            SELECT COUNT(*) 
+            FROM ${schema}.cars
+            WHERE name ILIKE $1
+        `;
+        const countResult = await client.query(countQuery, [`%${filter}%`]);
+        const totalParticipants = parseInt(countResult.rows[0].count);
+
+        // Den Suchbegriff anpassen (für Teilübereinstimmungen)
+        const values = [`%${filter}%`, limit, offset];
+
+        // Query ausführen
+        const result = await client.query(query, values);
+
+        // Helper-Funktion: Zusatzdaten abrufen und in ID-basiertes Mapping umwandeln
+        const fetchAdditionalData = async (table, ids) => {
+            if (!ids || ids.length === 0) return {};
+            
+            const query = `
+                SELECT * 
+                FROM ${schema}.${table} 
+                WHERE id = ANY($1::int[])
+            `;
+            const result = await client.query(query, [ids]);
+            
+            const dataById = {};
+            for (const row of result.rows) {
+                dataById[row.id] = row;
+            }
+            return dataById;
+        };
+
+        // IDs aus den Tour-Daten extrahieren
+        const brandIds = [...new Set(result.rows.map(item => item.brand).filter(brand => brand !== null))];
+        const carsIds = [...new Set(result.rows.map(item => item.car).filter(car => car !== null))];
+        const driverIds = [...new Set(result.rows.map(item => item.driver).filter(driver => driver !== null))];
+
+        // Zusatzdaten abrufen
+        const [brands, cars, drivers] = await Promise.all([
+            fetchAdditionalData('cars', carsIds),
+            fetchAdditionalData('car_brands', brandIds),
+            fetchAdditionalData('participants', driverIds),
+        ]);
+
+        res.json({
+            cars: result.rows,
+            data: {
+                brands: brands,
+                cars: cars,
+                drivers: drivers
+            },
+            pagination: {
+                total: totalParticipants,
+                page: page,
+                limit: limit,
+                offset: offset
+            }
+        });
+    } catch (err) {
+        console.error("Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/cars/:id', async (req, res) => {
+    try {
+        const schema = await getSchema(req);
+        const carId = req.params.id;
+        const { name, driver, passengers, seats, model, brand, color } = req.body;
+
+        await client.query(`UPDATE ${schema}.cars SET 
+            name = $1, 
+            driver = $2, 
+            passengers = $3, 
+            seats = $4,
+            model = $5,
+            brand = $6,
+            color = $7
+            WHERE id = $8`, [name, driver, passengers, seats, model, brand, color, carId]);
+        
+        res.json({ message: 'Car updated successfully' });
+    } catch (err) {
+        console.error("Error:", err.message);
+        if (err.message === 'Authorization header is missing' || err.message === 'Key not found') {
+            res.status(404).json({ message: 'Not found' });
+        } else {
+            res.status(500).json({ error: err.message });
+        }
+    }
+});
+
+app.delete('/api/cars/:id', async (req, res) => {
+    try {
+        const schema = await getSchema(req);
+        const carId = req.params.id;
+
+        await client.query(`DELETE FROM ${schema}.cars WHERE id = $1`, [carId]);
+        
+        res.json({ message: 'Car deleted successfully' });
+    } catch (err) {
+        console.error("Error:", err.message);
+        if (err.message === 'Authorization header is missing' || err.message === 'Key not found') {
+            res.status(404).json({ message: 'Not found' });
+        } else {
+            res.status(500).json({ error: err.message });
+        }
+    }
+});
+
 // THINGS
 
 app.post('/api/things', async (req, res) => {
@@ -332,9 +547,41 @@ app.get('/api/things', async (req, res) => {
         // Query ausführen
         const result = await client.query(query, values);
 
+        // Helper-Funktion: Zusatzdaten abrufen und in ID-basiertes Mapping umwandeln
+        const fetchAdditionalData = async (table, ids) => {
+            if (!ids || ids.length === 0) return {};
+            
+            const query = `
+                SELECT * 
+                FROM ${schema}.${table} 
+                WHERE id = ANY($1::int[])
+            `;
+            const result = await client.query(query, [ids]);
+            
+            const dataById = {};
+            for (const row of result.rows) {
+                dataById[row.id] = row;
+            }
+            return dataById;
+        };
+
+        // IDs aus den Tour-Daten extrahieren
+        const categoryIds = [...new Set(result.rows.map(item => item.category).filter(category => category !== null))];
+        const unitIds = [...new Set(result.rows.map(item => item.unit_id).filter(unit_id => unit_id !== null))];
+
+        // Zusatzdaten abrufen
+        const [categories, units] = await Promise.all([
+            fetchAdditionalData('thing_categories', categoryIds),
+            fetchAdditionalData('thing_units', unitIds),
+        ]);
+
         // Ergebnisse zurückgeben
         res.json({
             things: result.rows,
+            data: {
+                categories: categories,
+                units: units
+            },
             pagination: {
                 total: totalThings,
                 page: page,
@@ -399,9 +646,9 @@ app.delete('/api/things/:id', async (req, res) => {
 app.post('/api/tours', async (req, res) => {
     try {
         const schema = await getSchema(req);
-        const { tourData, tourMembers, tourThings, tourCars } = req.body;
+        const { tourData, tourMembers, tourThings, tourCars, tourAssignments } = req.body;
 
-        await client.query(`INSERT INTO ${schema}.tours (tour_data, tour_members, tour_things, tour_cars) VALUES ($1, $2, $3, $4)`, [tourData, tourMembers, tourThings, tourCars]);
+        await client.query(`INSERT INTO ${schema}.tours (tour_data, tour_members, tour_things, tour_cars, tour_assignments) VALUES ($1, $2, $3, $4, $5)`, [tourData, tourMembers, tourThings, tourCars, tourAssignments]);
         
         res.json({ message: 'Tour added successfully' });
     } catch (err) {
@@ -463,6 +710,8 @@ app.get('/api/tour/:id', async (req, res) => {
             fetchAdditionalData('cars', tourCarsIds), // Tabelle für Autos
         ]);
 
+        const totalWeight = Object.values(thingsDataById).reduce((sum, thing) => sum + (thing.weight || 0), 0);
+
         // Antwortobjekt erstellen
         const response = {
             id: tour.id,
@@ -478,7 +727,10 @@ app.get('/api/tour/:id', async (req, res) => {
             tour_things: {
                 ids: tourThingsIds,
                 data: thingsDataById,
-            }
+                totalWeight: totalWeight,
+            },
+            tour_assignments: JSON.parse(tour.tour_assignments || '{}'),
+
         };
 
         res.json({ tour: response });
@@ -551,6 +803,8 @@ app.get('/api/tours', async (req, res) => {
             const tourMembersIds = JSON.parse(tour.tour_members || '[]');
             const tourCarsIds = JSON.parse(tour.tour_cars || '[]');
 
+            const totalWeight = tourThingsIds.reduce((sum, id) => sum + (thingsDataById[id]?.weight || 0), 0);
+
             return {
                 id: tour.id,
                 tour_data: JSON.parse(tour.tour_data || '{}'),
@@ -565,6 +819,7 @@ app.get('/api/tours', async (req, res) => {
                 tour_things: {
                     ids: tourThingsIds,
                     data: thingsDataById,
+                    totalWeight: totalWeight,
                 }
             };
         });
@@ -654,7 +909,7 @@ app.put('/api/tour/:id/participants', async (req, res) => {
         const tourID = req.params.id;
         const { tourMembers } = req.body;
 
-        console.log('tourParticipants',tourMembers)
+        console.log('tourParticipants', tourMembers)
 
         await client.query(
             `UPDATE ${schema}.tours SET tour_members = $1 WHERE id = $2`,
@@ -695,6 +950,29 @@ app.put('/api/tour/:id/things', async (req, res) => {
     }
 });
 
+app.put('/api/tour/:id/assignments', async (req, res) => {
+    try {
+        const schema = await getSchema(req);
+        const tourID = req.params.id;
+        const { tourAssignments } = req.body;
+
+        // Führe die UPDATE-Abfrage in der entsprechenden Tabelle des ermittelten Schemas aus
+        await client.query(
+            `UPDATE ${schema}.tours SET tour_assignments = $1 WHERE id = $2`,
+            [tourAssignments, tourID]
+        );
+
+        res.json({ message: 'Tour Assignments updated successfully' });
+    } catch (err) {
+        console.error("Error:", err.message);
+        if (err.message === 'Authorization header is missing' || err.message === 'Key not found') {
+            res.status(404).json({ message: 'Not found' });
+        } else {
+            res.status(500).json({ error: err.message });
+        }
+    }
+});
+
 app.delete('/api/tours/:id', async (req, res) => {
     try {
         const schema = await getSchema(req);
@@ -711,6 +989,106 @@ app.delete('/api/tours/:id', async (req, res) => {
         } else {
             res.status(500).json({ error: err.message });
         }
+    }
+});
+
+// SETTINGS
+
+app.get('/api/settings/:table', async (req, res) => {
+    try {
+        const schema = await getSchema(req);
+        const { table } = req.params;
+        
+        // Allow only specific tables
+        const allowedTables = settingsTables.map(setting => setting.table);
+        if (!allowedTables.includes(table)) {
+            return res.status(400).json({ error: 'Invalid table name' });
+        }
+
+        const result = await client.query(`SELECT * FROM ${schema}.${table.toLowerCase()}`);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'No data found' });
+        }
+
+        res.json({ table: table, data: result.rows });
+    } catch (err) {
+        console.error("Error:", err.message);
+        res.status(500).json({ error: 'An internal server error occurred' });
+    }
+});
+
+
+// app.get('/api/settings/:table', async (req, res) => {
+//     try {
+//         const schema = await getSchema(req);
+//         const { table } = req.params;
+        
+//         const result = await client.query(`SELECT * FROM ${schema}.${table.toLowerCase()}`);
+        
+//         if (result.rows.length === 0) {
+//             return res.status(404).json({ message: 'No data found' });
+//         }
+        
+//         const dataWithTableName = result.rows.map(row => ({ ...row, table: table }));
+        
+//         res.json({ table: table, data: dataWithTableName });
+//     } catch (err) {
+//         console.error("Error:", err.message);
+//         if (err.message === 'Missing key parameter') {
+//             res.status(400).json({ message: 'Missing key parameter' });
+//         } else {
+//             res.status(500).json({ error: 'An internal server error occurred' });
+//         }
+//     }
+// });
+
+app.post('/api/settings/:table', async (req, res) => {
+    try {
+        const schema = await getSchema(req);
+        const { table } = req.params;
+        const { value } = req.body;
+        
+        if (!value) {
+            return res.status(400).json({ message: 'Value is required' });
+        }
+        
+        await client.query(`INSERT INTO ${schema}.${table.toLowerCase()} (value) VALUES ($1)`, [value]);
+        res.status(201).json({ message: 'Value added successfully' });
+    } catch (err) {
+        console.error("Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/settings/:table/:id', async (req, res) => {
+    try {
+        const schema = await getSchema(req);
+        const { table, id } = req.params;
+        const { value } = req.body;
+        
+        if (!value) {
+            return res.status(400).json({ message: 'Value is required' });
+        }
+        
+        await client.query(`UPDATE ${schema}.${table.toLowerCase()} SET value = $1 WHERE id = $2`, [value, id]);
+        res.json({ message: 'Value updated successfully' });
+    } catch (err) {
+        console.error("Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/settings/:table/:id', async (req, res) => {
+    try {
+        const schema = await getSchema(req);
+        const { table, id } = req.params;
+        
+        await client.query(`DELETE FROM ${schema}.${table.toLowerCase()} WHERE id = $1`, [id]);
+        res.json({ message: 'Value deleted successfully' });
+    } catch (err) {
+        console.error("Error:", err.message);
+        res.status(500).json({ error: err.message });
     }
 });
 
