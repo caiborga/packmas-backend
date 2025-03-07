@@ -5,26 +5,18 @@ const app = express();
 const backendPort = 3400;
 const frontendPort = 4200;
 const port = process.env.PORT || backendPort;
+require('dotenv').config();
 
-// const client = new Client({
-//     user: 'postgres',
-//     host: 'localhost',
-//     database: 'packmas_db',
-//     password: 'postgresql4Crap!',
-//     port: 3300,
-// });
-
-// HEROKU DB
 const client = new Client({
-    user: 'whvuennigfhsfj',
-    host: 'ec2-52-51-248-250.eu-west-1.compute.amazonaws.com',
-    database: 'da65frsefubl36',
-    password: '93efbf1c80ff756030f418b429ebd60bd1ea504d9589a3fe116b1246fc1f366b',
-    port: 5432,
+    connectionString: process.env.DATABASE_URL,
     ssl: {
         rejectUnauthorized: false
     }
 });
+
+client.connect()
+    .then(() => console.log("Erfolgreich mit der Datenbank verbunden"))
+    .catch(err => console.error("Fehler bei der Datenbankverbindung:", err));
 
 const settingsTables = [
     { 
@@ -48,8 +40,6 @@ const settingsTables = [
         elements: ['Verbrauchsgegenstände', 'Nahrungsmittel', 'Sonstige']
     }
 ]
-
-client.connect();
 
 client.query(`
         CREATE TABLE IF NOT EXISTS login (

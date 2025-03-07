@@ -19,3 +19,4 @@
 /libpeerconnection.log
 testem.log
 /typings
+.env
