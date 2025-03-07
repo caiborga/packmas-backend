@@ -10,7 +10,7 @@ require("dotenv").config();
 
 app.use(
 	cors({
-		origin: "https://packmas-c545d34ac462.herokuapp.com",
+		origin: "https://pack-mas-5525b94af9e0.herokuapp.com",
 		methods: "GET,POST,PUT,DELETE,OPTIONS",
 		allowedHeaders: "Content-Type, Authorization"
 	})
@@ -19,7 +19,7 @@ app.use(
 app.options("*", (req, res) => {
 	res.header(
 		"Access-Control-Allow-Origin",
-		"https://packmas-c545d34ac462.herokuapp.com"
+		"https://pack-mas-5525b94af9e0.herokuapp.com"
 	);
 	res.header(
 		"Access-Control-Allow-Methods",
